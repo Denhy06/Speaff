@@ -1,71 +1,57 @@
-import puppeteer from 'puppeteer-core';
-import chromium from '@sparticuz/chromium';
 import { NextResponse } from 'next/server';
 
-// Memaksa Next.js agar tidak meng-cache API ini
 export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
-  let browser = null;
-
   try {
     const { url } = await request.json();
-    
-    
-    const executablePath = await chromium.executablePath();
-    
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: executablePath,
-      headless: chromium.headless,
-      ignoreHTTPSErrors: true,
-    });
-    
-    const page = await browser.newPage();
-    
-    // Trik menyamar sebagai browser biasa
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    if (!url) throw new Error('URL kosong');
+
+    // Trik: Menyamar sebagai Bot Facebook/WhatsApp.
+    // Shopee sengaja membuka akses untuk bot ini agar link bisa ada preview-nya (OG Tags).
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+        'Accept': 'text/html',
+        'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7'
+      },
+      redirect: 'follow', // Otomatis telusuri redirect dari s.shopee.co.id ke url produk asli
     });
 
-    // Menunggu halaman selesai dimuat. Timeout dibuat lebih aman (10 detik)
-    // agar tidak bertabrakan dengan batas maksimal gratisan Vercel
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
-    
-    // Tunggu sejenak agar link shp.ee selesai redirect ke produk asli
-    await new Promise(r => setTimeout(r, 3000)); 
-
-    // Proses mengambil data
-    const productData = await page.evaluate(() => {
-      const titleTag = document.querySelector('meta[property="og:title"]');
-      const imageTag = document.querySelector('meta[property="og:image"]');
-      
-      return {
-        title: titleTag ? titleTag.content : document.title,
-        image: imageTag ? imageTag.content : null,
-        url: document.location.href
-      };
-    });
-
-    await browser.close();
-
-    // Jika tertangkap basah sebagai robot oleh Shopee, beri peringatan
-    if (!productData.title || productData.title.includes('Shopee Indonesia')) {
-      throw new Error("Waktu habis, halaman Shopee gagal termuat sempurna atau terdeteksi bot.");
+    if (!response.ok) {
+      throw new Error(`Gagal akses Shopee (Status: ${response.status})`);
     }
 
-    return NextResponse.json(productData);
-    
+    const html = await response.text();
+    const finalUrl = response.url; // Menangkap URL panjang aslinya
+
+    // Ekstrak data langsung dari teks HTML menggunakan Regex
+    // Tidak butuh cheerio atau puppeteer sama sekali
+    const titleMatch = html.match(/<meta\s+(?:property|name)="og:title"\s+content="([^"]+)"/i);
+    const imageMatch = html.match(/<meta\s+(?:property|name)="og:image"\s+content="([^"]+)"/i);
+
+    let title = titleMatch ? titleMatch[1] : null;
+    let image = imageMatch ? imageMatch[1] : null;
+
+    // Bersihkan karakter aneh pada judul (HTML Entities) jika ada
+    if (title) {
+      title = title.replace(/&#39;/g, "'").replace(/&amp;/g, "&").replace(/&quot;/g, '"');
+    }
+
+    if (!title) {
+       throw new Error("Gagal mengambil data produk. Link mungkin salah atau dihapus.");
+    }
+
+    return NextResponse.json({
+      title,
+      image,
+      url: finalUrl
+    });
+
   } catch (error) {
-    // Pastikan browser selalu ditutup meskipun error, agar memori server Vercel tidak penuh
-    if (browser !== null) {
-      await browser.close();
-    }
-    
     return NextResponse.json(
-      { error: error.message || 'Gagal mengambil data dari server Vercel.' }, 
+      { error: error.message || 'Terjadi kesalahan sistem' },
       { status: 500 }
     );
   }
