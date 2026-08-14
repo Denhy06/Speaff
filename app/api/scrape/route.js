@@ -2,8 +2,8 @@ import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 import { NextResponse } from 'next/server';
 
-// Opsi khusus untuk memperpanjang waktu proses di Vercel
-export const maxDuration = 60; 
+// Memaksa Next.js agar tidak meng-cache API ini
+export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
   let browser = null;
@@ -11,7 +11,7 @@ export async function POST(request) {
   try {
     const { url } = await request.json();
     
-    // Konfigurasi Chromium khusus untuk Vercel
+    
     const executablePath = await chromium.executablePath();
     
     browser = await puppeteer.launch({
